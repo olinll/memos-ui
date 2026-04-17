@@ -11,6 +11,17 @@ interface AuthContextType {
 
 const AuthContext = createContext<AuthContextType | null>(null);
 
+const COOKIE_NAME = 'memos.access-token';
+
+function setAuthCookie(token: string) {
+  const maxAge = 60 * 60 * 24 * 30;
+  document.cookie = `${COOKIE_NAME}=${encodeURIComponent(token)}; path=/; max-age=${maxAge}; SameSite=Lax`;
+}
+
+function clearAuthCookie() {
+  document.cookie = `${COOKIE_NAME}=; path=/; max-age=0; SameSite=Lax`;
+}
+
 export function AuthProvider({ children }: { children: ReactNode }) {
   const [user, setUser] = useState<User | null>(null);
   const [loading, setLoading] = useState(true);
@@ -18,9 +29,13 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   useEffect(() => {
     const token = localStorage.getItem('access_token');
     if (token) {
+      setAuthCookie(token);
       getCurrentUser()
         .then(setUser)
-        .catch(() => localStorage.removeItem('access_token'))
+        .catch(() => {
+          localStorage.removeItem('access_token');
+          clearAuthCookie();
+        })
         .finally(() => setLoading(false));
     } else {
       setLoading(false);
@@ -30,12 +45,14 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const signIn = useCallback(async (username: string, password: string) => {
     const res = await apiSignIn(username, password);
     localStorage.setItem('access_token', res.accessToken);
+    setAuthCookie(res.accessToken);
     setUser(res.user);
   }, []);
 
   const signOut = useCallback(async () => {
     try { await apiSignOut(); } catch { /* ignore */ }
     localStorage.removeItem('access_token');
+    clearAuthCookie();
     setUser(null);
   }, []);
 

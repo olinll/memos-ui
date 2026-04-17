@@ -1,9 +1,12 @@
 import { useState, useEffect, useCallback } from 'react';
+import { flushSync } from 'react-dom';
 import { useNavigate } from 'react-router-dom';
-import { Loader2, X, PenSquare } from 'lucide-react';
+import { Loader2, X, PenSquare, Rows3, Columns2 } from 'lucide-react';
 import MemoCard from '../components/MemoCard';
+import ActivityHeatmap from '../components/ActivityHeatmap';
+import { useAuth } from '../contexts/AuthContext';
 import type { Memo } from '../types';
-import { listMemos, updateMemo, deleteMemo } from '../api/memos';
+import { listMemos, updateMemo, deleteMemo, getUserStats } from '../api/memos';
 
 export default function Home() {
   const [memos, setMemos] = useState<Memo[]>([]);
@@ -11,7 +14,71 @@ export default function Home() {
   const [nextPageToken, setNextPageToken] = useState('');
   const [loadingMore, setLoadingMore] = useState(false);
   const [filterTags, setFilterTags] = useState<string[]>([]);
+  const [absoluteTime, setAbsoluteTime] = useState(false);
+  const [activity, setActivity] = useState<Record<string, number>>({});
+  const [menuOpenName, setMenuOpenName] = useState<string | null>(null);
+  const [layout, setLayout] = useState<'single' | 'double'>(
+    () => (localStorage.getItem('memos-layout') as 'single' | 'double') || 'double'
+  );
+
+  useEffect(() => {
+    localStorage.setItem('memos-layout', layout);
+  }, [layout]);
+
+  const changeLayout = useCallback((next: 'single' | 'double') => {
+    if (next === layout) return;
+    const doc = document as Document & { startViewTransition?: (cb: () => void) => unknown };
+    if (doc.startViewTransition) {
+      doc.startViewTransition(() => flushSync(() => setLayout(next)));
+    } else {
+      setLayout(next);
+    }
+  }, [layout]);
+
+  useEffect(() => {
+    if (!menuOpenName) return;
+    const onDocClick = (e: MouseEvent) => {
+      const t = e.target as HTMLElement;
+      if (!t.closest('[data-memo-menu]')) setMenuOpenName(null);
+    };
+    document.addEventListener('click', onDocClick);
+    return () => document.removeEventListener('click', onDocClick);
+  }, [menuOpenName]);
   const navigate = useNavigate();
+  const { user } = useAuth();
+
+  const toLocalDateKey = (ts: string | Date): string => {
+    const d = typeof ts === 'string' ? new Date(ts) : ts;
+    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+  };
+
+  useEffect(() => {
+    if (!user) return;
+    getUserStats(user.name)
+      .then(stats => {
+        const counts: Record<string, number> = {};
+        for (const ts of stats.memoDisplayTimestamps || []) {
+          const key = toLocalDateKey(ts);
+          counts[key] = (counts[key] || 0) + 1;
+        }
+        if (Object.keys(counts).length > 0) setActivity(counts);
+      })
+      .catch((e) => console.warn('getUserStats failed:', e));
+  }, [user]);
+
+  // Fallback / merge: count loaded memos by displayTime so the heatmap is never empty
+  useEffect(() => {
+    if (memos.length === 0) return;
+    setActivity(prev => {
+      if (Object.keys(prev).length > 0) return prev;
+      const counts: Record<string, number> = {};
+      for (const m of memos) {
+        const key = toLocalDateKey(m.displayTime);
+        counts[key] = (counts[key] || 0) + 1;
+      }
+      return counts;
+    });
+  }, [memos]);
 
   const fetchMemos = useCallback(async (pageToken?: string) => {
     const isLoadMore = !!pageToken;
@@ -48,6 +115,10 @@ export default function Home() {
     setMemos(prev => prev.filter(m => m.name !== updated.name));
   };
 
+  const handleEdit = (memo: Memo) => {
+    navigate(`/edit/${memo.name}`);
+  };
+
   const handleTagClick = useCallback((tag: string) => {
     setFilterTags(prev =>
       prev.includes(tag) ? prev.filter(t => t !== tag) : [...prev, tag]
@@ -64,14 +135,43 @@ export default function Home() {
 
   return (
     <div className="space-y-6">
-      {/* Quick input */}
-      <button
-        onClick={() => navigate('/write')}
-        className="w-full flex items-center gap-3 px-4 py-3 bg-surface rounded-2xl border border-border shadow-sm text-text-secondary/50 hover:border-primary/30 hover:shadow-md transition cursor-text text-left"
-      >
-        <PenSquare className="w-4 h-4 shrink-0" />
-        <span className="text-[15px]">记录此刻的想法...</span>
-      </button>
+      {/* Activity heatmap — only meaningful when viewing as the signed-in user */}
+      {user && <ActivityHeatmap counts={activity} />}
+
+      {/* Quick input + layout toggle */}
+      <div className="flex items-stretch gap-3 fade-in">
+        <button
+          onClick={() => navigate(user ? '/write' : '/login')}
+          className="flex-1 flex items-center gap-3 px-4 py-3 bg-surface rounded-2xl border border-border shadow-sm text-text-secondary/50 hover:border-primary/30 hover:shadow-md cursor-text text-left card-hover"
+        >
+          <PenSquare className="w-4 h-4 shrink-0" />
+          <span className="text-[15px]">
+            {user ? '记录此刻的想法...' : '登录后开始记录'}
+          </span>
+        </button>
+        <div className="inline-flex items-center bg-surface border border-border rounded-2xl p-1 shadow-sm shrink-0">
+          <button
+            onClick={() => changeLayout('single')}
+            className={`flex items-center gap-1 px-2.5 py-1.5 rounded-xl text-xs transition ${
+              layout === 'single' ? 'bg-tag text-primary' : 'text-text-secondary hover:text-text-primary'
+            }`}
+            title="单栏"
+          >
+            <Rows3 className="w-3.5 h-3.5" />
+            单栏
+          </button>
+          <button
+            onClick={() => changeLayout('double')}
+            className={`flex items-center gap-1 px-2.5 py-1.5 rounded-xl text-xs transition ${
+              layout === 'double' ? 'bg-tag text-primary' : 'text-text-secondary hover:text-text-primary'
+            }`}
+            title="双栏"
+          >
+            <Columns2 className="w-3.5 h-3.5" />
+            双栏
+          </button>
+        </div>
+      </div>
 
       {/* Tag filter */}
       {filterTags.length > 0 && (
@@ -102,36 +202,59 @@ export default function Home() {
           <Loader2 className="w-6 h-6 animate-spin text-text-secondary" />
         </div>
       ) : (
-        <div className="space-y-4">
+        <div className="space-y-4" style={{ viewTransitionName: 'memo-list' }}>
           {/* Pinned */}
           {pinnedMemos.length > 0 && (
             <>
               <h3 className="text-xs font-semibold text-text-secondary uppercase tracking-wider">置顶</h3>
-              {pinnedMemos.map(memo => (
-                <MemoCard
-                  key={memo.name}
-                  memo={memo}
-                  onDelete={handleDelete}
-                  onPin={handlePin}
-                  onArchive={handleArchive}
-                  onTagClick={handleTagClick}
-                  activeTags={filterTags}
-                />
-              ))}
+              <div className={layout === 'double' ? 'columns-2 gap-4 [column-fill:balance]' : 'space-y-4'}>
+                {pinnedMemos.map(memo => {
+                  const canManage = !!user && user.name === memo.creator;
+                  return (
+                    <div key={memo.name} className={layout === 'double' ? 'mb-4 break-inside-avoid' : ''}>
+                      <MemoCard
+                        memo={memo}
+                        onEdit={canManage ? handleEdit : undefined}
+                        onDelete={canManage ? handleDelete : undefined}
+                        onPin={canManage ? handlePin : undefined}
+                        onArchive={canManage ? handleArchive : undefined}
+                        onTagClick={handleTagClick}
+                        activeTags={filterTags}
+                        absoluteTime={absoluteTime}
+                        onToggleTime={() => setAbsoluteTime(v => !v)}
+                        menuOpen={menuOpenName === memo.name}
+                        onMenuOpenChange={(open) => setMenuOpenName(open ? memo.name : null)}
+                      />
+                    </div>
+                  );
+                })}
+              </div>
             </>
           )}
 
           {/* Normal */}
-          {normalMemos.map(memo => (
-            <MemoCard
-              key={memo.name}
-              memo={memo}
-              onDelete={handleDelete}
-              onPin={handlePin}
-              onArchive={handleArchive}
-              onTagClick={handleTagClick}
-            />
-          ))}
+          <div className={layout === 'double' ? 'columns-2 gap-4 [column-fill:balance]' : 'space-y-4'}>
+            {normalMemos.map(memo => {
+              const canManage = !!user && user.name === memo.creator;
+              return (
+                <div key={memo.name} className={layout === 'double' ? 'mb-4 break-inside-avoid' : ''}>
+                  <MemoCard
+                    memo={memo}
+                    onEdit={canManage ? handleEdit : undefined}
+                    onDelete={canManage ? handleDelete : undefined}
+                    onPin={canManage ? handlePin : undefined}
+                    onArchive={canManage ? handleArchive : undefined}
+                    onTagClick={handleTagClick}
+                    activeTags={filterTags}
+                    absoluteTime={absoluteTime}
+                    onToggleTime={() => setAbsoluteTime(v => !v)}
+                    menuOpen={menuOpenName === memo.name}
+                    onMenuOpenChange={(open) => setMenuOpenName(open ? memo.name : null)}
+                  />
+                </div>
+              );
+            })}
+          </div>
 
           {memos.length === 0 && (
             <div className="text-center py-12 text-text-secondary">

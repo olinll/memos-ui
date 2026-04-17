@@ -1,11 +1,13 @@
-import { useState } from 'react';
+import { useState, useRef, useEffect } from 'react';
+import { Link } from 'react-router-dom';
+import toast from 'react-hot-toast';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
-import { formatDistanceToNow } from 'date-fns';
+import { formatDistanceToNowStrict, format } from 'date-fns';
 import { zhCN } from 'date-fns/locale';
 import {
   Pin, MoreHorizontal, Edit3, Trash2, Archive, Globe, Lock, Users,
-  MapPin, Smile,
+  MapPin, Smile, ExternalLink, Link2, ClipboardCopy, Copy, ChevronRight, Paperclip,
 } from 'lucide-react';
 import type { Memo } from '../types';
 import { getAttachmentUrl } from '../api/memos';
@@ -25,17 +27,69 @@ interface MemoCardProps {
   onPin?: (memo: Memo) => void;
   onTagClick?: (tag: string) => void;
   activeTags?: string[];
+  absoluteTime?: boolean;
+  onToggleTime?: () => void;
+  menuOpen?: boolean;
+  onMenuOpenChange?: (open: boolean) => void;
 }
 
-export default function MemoCard({ memo, onEdit, onDelete, onArchive, onPin, onTagClick, activeTags = [] }: MemoCardProps) {
-  const [showMenu, setShowMenu] = useState(false);
+export default function MemoCard({ memo, onEdit, onDelete, onArchive, onPin, onTagClick, activeTags = [], absoluteTime = false, onToggleTime, menuOpen, onMenuOpenChange }: MemoCardProps) {
+  const [internalShowMenu, setInternalShowMenu] = useState(false);
+  const showMenu = menuOpen ?? internalShowMenu;
+  const setShowMenu = (v: boolean) => {
+    if (onMenuOpenChange) onMenuOpenChange(v);
+    else setInternalShowMenu(v);
+  };
   const [lightboxIndex, setLightboxIndex] = useState<number | null>(null);
+  const [copyOpen, setCopyOpen] = useState(false);
+  const copyCloseTimer = useRef<number | null>(null);
+
+  const openCopy = () => {
+    if (copyCloseTimer.current != null) {
+      window.clearTimeout(copyCloseTimer.current);
+      copyCloseTimer.current = null;
+    }
+    setCopyOpen(true);
+  };
+  const scheduleCloseCopy = () => {
+    if (copyCloseTimer.current != null) window.clearTimeout(copyCloseTimer.current);
+    copyCloseTimer.current = window.setTimeout(() => setCopyOpen(false), 150);
+  };
+
+  useEffect(() => {
+    if (!showMenu) setCopyOpen(false);
+  }, [showMenu]);
+
+  useEffect(() => () => {
+    if (copyCloseTimer.current != null) window.clearTimeout(copyCloseTimer.current);
+  }, []);
 
   const VisIcon = visIcons[memo.visibility];
-  const timeAgo = formatDistanceToNow(new Date(memo.displayTime), {
-    addSuffix: true,
-    locale: zhCN,
-  });
+
+  const copyToClipboard = async (text: string, label: string) => {
+    try {
+      await navigator.clipboard.writeText(text);
+      toast.success(`${label}已复制`);
+    } catch {
+      toast.error('复制失败');
+    }
+  };
+
+  const handleCopyLink = () => {
+    const url = `${window.location.origin}/memo/${memo.name}`;
+    copyToClipboard(url, '链接');
+    setShowMenu(false);
+  };
+
+  const handleCopyContent = () => {
+    copyToClipboard(memo.content, '内容');
+    setShowMenu(false);
+  };
+
+  const displayDate = new Date(memo.displayTime);
+  const timeLabel = absoluteTime
+    ? format(displayDate, 'yyyy-MM-dd HH:mm')
+    : formatDistanceToNowStrict(displayDate, { addSuffix: true, locale: zhCN });
 
   // Extract location and mood from content
   const locationMatch = memo.content.match(/(?:📍|位置)\s*[:：]?\s*([^\n💭心情]*)/);
@@ -44,22 +98,45 @@ export default function MemoCard({ memo, onEdit, onDelete, onArchive, onPin, onT
   const moodMatch = memo.content.match(/(?:💭|心情)\s*[:：]?\s*([^\n]*)/);
   const mood = moodMatch?.[1]?.trim();
 
-  // Remove location/mood line and standalone tags from display content
+  // Remove only the location/mood meta line from display; keep #tags as plain text
   const displayContent = memo.content
-    .replace(/^#\S+\s*/gm, '')
     .replace(/(?:📍|位置)[^\n]*/g, '')
     .trim();
 
 
-  const images = memo.attachments.filter(a => a.type.startsWith('image/'));
-  const otherFiles = memo.attachments.filter(a => !a.type.startsWith('image/'));
+  // Skip attachments that the author already referenced inline via markdown
+  // (![](url) / [](url)) — otherwise they'd render twice: once in the body
+  // and again in the dedicated attachment strip.
+  const isInlineReferenced = (att: typeof memo.attachments[number]) => {
+    const url = getAttachmentUrl(att.name, att.filename);
+    return memo.content.includes(url) || memo.content.includes(att.name);
+  };
+  const standaloneAttachments = memo.attachments.filter(a => !isInlineReferenced(a));
+  const images = standaloneAttachments.filter(a => a.type.startsWith('image/'));
+  const otherFiles = standaloneAttachments.filter(a => !a.type.startsWith('image/'));
+
+  // Parse inline markdown images so they can open the lightbox too.
+  const inlineImages = [...displayContent.matchAll(/!\[([^\]]*)\]\(([^)\s]+)[^)]*\)/g)]
+    .map(m => ({ src: m[2], alt: m[1] || '' }));
+  const standaloneImageSrcs = images.map(img => ({
+    src: getAttachmentUrl(img.name, img.filename),
+    alt: img.filename,
+  }));
+  const allImages = [...inlineImages, ...standaloneImageSrcs];
 
   return (
-    <div className="bg-surface rounded-2xl border border-border shadow-sm hover:shadow-md transition p-4 group">
+    <div className={`relative bg-surface rounded-2xl border border-border shadow-sm hover:shadow-md p-4 group fade-in-up card-hover ${showMenu ? 'z-40' : ''}`}>
       {/* Header */}
       <div className="flex items-center justify-between mb-2">
         <div className="flex items-center gap-2 text-sm text-text-secondary">
-          <span>{timeAgo}</span>
+          <button
+            type="button"
+            onClick={onToggleTime}
+            className="hover:text-primary transition cursor-pointer"
+            title={absoluteTime ? '切换为相对时间' : '切换为具体时间'}
+          >
+            {timeLabel}
+          </button>
           <VisIcon className="w-3.5 h-3.5" />
           {memo.pinned && <Pin className="w-3.5 h-3.5 text-primary" />}
           {location && (
@@ -76,17 +153,27 @@ export default function MemoCard({ memo, onEdit, onDelete, onArchive, onPin, onT
           )}
         </div>
 
-        <div className="relative">
+        <div className="flex items-center gap-0.5">
+          <Link
+            to={`/memo/${memo.name}`}
+            className="p-1 rounded-lg text-text-secondary opacity-0 group-hover:opacity-100 hover:bg-surface-secondary hover:text-primary transition"
+            title="查看详情"
+          >
+            <ExternalLink className="w-4 h-4" />
+          </Link>
+          <div className="relative">
           <button
-            onClick={() => setShowMenu(!showMenu)}
+            onClick={(e) => { e.stopPropagation(); setShowMenu(!showMenu); }}
             className="p-1 rounded-lg text-text-secondary opacity-0 group-hover:opacity-100 hover:bg-surface-secondary transition"
           >
             <MoreHorizontal className="w-4 h-4" />
           </button>
           {showMenu && (
-            <>
-              <div className="fixed inset-0 z-10" onClick={() => setShowMenu(false)} />
-              <div className="absolute right-0 top-full mt-1 bg-surface rounded-lg border border-border shadow-lg py-1 z-20 min-w-[120px]">
+            <div
+              data-memo-menu
+              onClick={(e) => e.stopPropagation()}
+              className="absolute right-0 top-full mt-1 bg-surface rounded-lg border border-border shadow-lg py-1 z-50 min-w-[120px] menu-pop"
+            >
                 {onPin && (
                   <button
                     onClick={() => { onPin(memo); setShowMenu(false); }}
@@ -105,6 +192,44 @@ export default function MemoCard({ memo, onEdit, onDelete, onArchive, onPin, onT
                     编辑
                   </button>
                 )}
+                <div
+                  className="relative"
+                  onMouseEnter={openCopy}
+                  onMouseLeave={scheduleCloseCopy}
+                >
+                  <button
+                    type="button"
+                    className="w-full flex items-center gap-2 px-3 py-1.5 text-sm text-text-secondary hover:bg-surface-secondary"
+                  >
+                    <Copy className="w-3.5 h-3.5" />
+                    <span className="flex-1 text-left">复制</span>
+                    <ChevronRight className="w-3 h-3" />
+                  </button>
+                  {copyOpen && (
+                    <div
+                      onMouseEnter={openCopy}
+                      onMouseLeave={scheduleCloseCopy}
+                      className="absolute left-full top-0 pl-1 min-w-[120px] menu-pop"
+                    >
+                      <div className="bg-surface rounded-lg border border-border shadow-lg py-1">
+                        <button
+                          onClick={handleCopyLink}
+                          className="w-full flex items-center gap-2 px-3 py-1.5 text-sm text-text-secondary hover:bg-surface-secondary"
+                        >
+                          <Link2 className="w-3.5 h-3.5" />
+                          复制链接
+                        </button>
+                        <button
+                          onClick={handleCopyContent}
+                          className="w-full flex items-center gap-2 px-3 py-1.5 text-sm text-text-secondary hover:bg-surface-secondary"
+                        >
+                          <ClipboardCopy className="w-3.5 h-3.5" />
+                          复制内容
+                        </button>
+                      </div>
+                    </div>
+                  )}
+                </div>
                 {onArchive && (
                   <button
                     onClick={() => { onArchive(memo); setShowMenu(false); }}
@@ -124,66 +249,93 @@ export default function MemoCard({ memo, onEdit, onDelete, onArchive, onPin, onT
                   </button>
                 )}
               </div>
-            </>
           )}
+          </div>
         </div>
       </div>
 
       {/* Content */}
       <div className="markdown-body text-[15px]">
-        <ReactMarkdown remarkPlugins={[remarkGfm]}>{displayContent}</ReactMarkdown>
+        <ReactMarkdown
+          remarkPlugins={[remarkGfm]}
+          components={{
+            img: ({ src, alt }) => {
+              const idx = allImages.findIndex(im => im.src === src);
+              return (
+                <button
+                  type="button"
+                  onClick={(e) => { e.stopPropagation(); if (idx >= 0) setLightboxIndex(idx); }}
+                  className="inline-block overflow-hidden rounded-lg cursor-zoom-in max-w-full bg-surface-secondary align-middle"
+                >
+                  <img
+                    src={src}
+                    alt={alt || ''}
+                    className="block max-h-64 max-w-full w-auto h-auto"
+                    loading="lazy"
+                  />
+                </button>
+              );
+            },
+          }}
+        >
+          {displayContent}
+        </ReactMarkdown>
       </div>
 
-      {/* Images grid */}
-      {images.length > 0 && (
-        <>
-          <div className={`mt-3 gap-2 ${
-            images.length === 1 ? 'flex' :
-            images.length === 2 ? 'grid grid-cols-2' :
-            'grid grid-cols-3'
-          }`}>
-            {images.map((img, i) => (
-              <button
-                key={img.name}
-                onClick={() => setLightboxIndex(i)}
-                className="block overflow-hidden rounded-lg cursor-zoom-in"
-              >
-                <img
-                  src={getAttachmentUrl(img.name, img.filename)}
-                  alt={img.filename}
-                  className="w-full max-h-80 object-contain rounded-lg"
-                  loading="lazy"
-                />
-              </button>
-            ))}
+      {/* Attachments (only the ones not already inlined in the content) */}
+      {standaloneAttachments.length > 0 && (
+        <div className="mt-3 rounded-xl border-l-4 border-primary/50 bg-primary/5 px-3 py-2.5">
+          <div className="flex items-center gap-1.5 mb-2 text-xs font-medium text-primary">
+            <Paperclip className="w-3.5 h-3.5" />
+            <span>附件 ({standaloneAttachments.length})</span>
           </div>
-          {lightboxIndex !== null && (
-            <ImageLightbox
-              images={images.map(img => ({ src: getAttachmentUrl(img.name, img.filename), alt: img.filename }))}
-              currentIndex={lightboxIndex}
-              onClose={() => setLightboxIndex(null)}
-              onChangeIndex={setLightboxIndex}
-            />
+
+          {images.length > 0 && (
+            <div className="flex flex-wrap gap-2">
+              {images.map((img, i) => (
+                <button
+                  key={img.name}
+                  onClick={() => setLightboxIndex(inlineImages.length + i)}
+                  className="inline-block overflow-hidden rounded-lg cursor-zoom-in max-w-full bg-surface-secondary"
+                >
+                  <img
+                    src={getAttachmentUrl(img.name, img.filename)}
+                    alt={img.filename}
+                    className="block max-h-64 max-w-full w-auto h-auto"
+                    loading="lazy"
+                  />
+                </button>
+              ))}
+            </div>
           )}
-        </>
+
+          {otherFiles.length > 0 && (
+            <div className={`${images.length > 0 ? 'mt-2' : ''} space-y-1`}>
+              {otherFiles.map((file) => (
+                <a
+                  key={file.name}
+                  href={getAttachmentUrl(file.name, file.filename)}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="flex items-center gap-2 px-3 py-2 rounded-lg bg-surface border border-border text-sm text-text-secondary hover:text-primary hover:border-primary/40 transition"
+                >
+                  📎 {file.filename}
+                  <span className="text-xs">({(Number(file.size) / 1024).toFixed(1)} KB)</span>
+                </a>
+              ))}
+            </div>
+          )}
+
+        </div>
       )}
 
-      {/* Other attachments */}
-      {otherFiles.length > 0 && (
-        <div className="mt-3 space-y-1">
-          {otherFiles.map((file) => (
-            <a
-              key={file.name}
-              href={getAttachmentUrl(file.name, file.filename)}
-              target="_blank"
-              rel="noopener noreferrer"
-              className="flex items-center gap-2 px-3 py-2 rounded-lg bg-surface-secondary text-sm text-text-secondary hover:text-primary transition"
-            >
-              📎 {file.filename}
-              <span className="text-xs">({(Number(file.size) / 1024).toFixed(1)} KB)</span>
-            </a>
-          ))}
-        </div>
+      {lightboxIndex !== null && allImages.length > 0 && (
+        <ImageLightbox
+          images={allImages}
+          currentIndex={lightboxIndex}
+          onClose={() => setLightboxIndex(null)}
+          onChangeIndex={setLightboxIndex}
+        />
       )}
 
       {/* Tags */}

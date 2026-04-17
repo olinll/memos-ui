@@ -1,4 +1,5 @@
 import { useEffect, useCallback } from 'react';
+import { createPortal } from 'react-dom';
 import { X, ChevronLeft, ChevronRight } from 'lucide-react';
 
 interface ImageLightboxProps {
@@ -9,6 +10,7 @@ interface ImageLightboxProps {
 }
 
 export default function ImageLightbox({ images, currentIndex, onClose, onChangeIndex }: ImageLightboxProps) {
+  const current = images[currentIndex];
   const hasPrev = currentIndex > 0;
   const hasNext = currentIndex < images.length - 1;
 
@@ -27,8 +29,10 @@ export default function ImageLightbox({ images, currentIndex, onClose, onChangeI
     };
   }, [handleKeyDown]);
 
-  return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center" onClick={onClose}>
+  if (!current) return null;
+
+  return createPortal(
+    <div className="fixed inset-0 z-[9999] flex items-center justify-center" onClick={onClose}>
       {/* Backdrop */}
       <div className="absolute inset-0 bg-black/80" />
 
@@ -56,8 +60,8 @@ export default function ImageLightbox({ images, currentIndex, onClose, onChangeI
 
       {/* Image */}
       <img
-        src={images[currentIndex].src}
-        alt={images[currentIndex].alt}
+        src={current.src}
+        alt={current.alt}
         onClick={(e) => e.stopPropagation()}
         className="relative z-10 max-w-[90vw] max-h-[90vh] object-contain rounded-lg shadow-2xl"
       />
@@ -71,6 +75,7 @@ export default function ImageLightbox({ images, currentIndex, onClose, onChangeI
           <ChevronRight className="w-6 h-6" />
         </button>
       )}
-    </div>
+    </div>,
+    document.body,
   );
 }

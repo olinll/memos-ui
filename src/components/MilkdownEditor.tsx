@@ -1,4 +1,4 @@
-import { useRef, useCallback, type KeyboardEvent, type ChangeEvent } from 'react';
+import { useRef, useCallback, type KeyboardEvent, type ChangeEvent, type ClipboardEvent, type DragEvent } from 'react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import {
@@ -35,14 +35,21 @@ const toolbarActions: (ToolbarAction | 'divider')[] = [
   { icon: Image, label: '图片', prefix: '![', suffix: '](url)' },
 ];
 
+export interface UploadedFileRef {
+  filename: string;
+  url: string;
+  isImage: boolean;
+}
+
 interface LiveEditorProps {
   content: string;
   onChange: (content: string) => void;
   location?: string;
   mood?: string;
+  onFilesPaste?: (files: File[]) => Promise<UploadedFileRef[]>;
 }
 
-export default function LiveEditor({ content, onChange, location, mood }: LiveEditorProps) {
+export default function LiveEditor({ content, onChange, location, mood, onFilesPaste }: LiveEditorProps) {
   const textareaRef = useRef<HTMLTextAreaElement>(null);
 
   const insertMarkdown = useCallback((action: ToolbarAction) => {
@@ -102,6 +109,64 @@ export default function LiveEditor({ content, onChange, location, mood }: LiveEd
     onChange(e.target.value);
   };
 
+  // Shared logic: upload dropped/pasted files, then splice markdown at the
+  // cursor position captured *before* the async upload started. Using
+  // `ta.value` (latest DOM value) means user typing during upload isn't
+  // overwritten, though the insertion point may drift.
+  const insertFilesAtCursor = useCallback(async (files: File[]) => {
+    if (!onFilesPaste || files.length === 0) return;
+    const ta = textareaRef.current;
+    if (!ta) return;
+    const insertPos = ta.selectionStart;
+
+    const results = await onFilesPaste(files);
+    if (results.length === 0) return;
+
+    const snippet = results
+      .map(r => (r.isImage ? `![${r.filename}](${r.url})` : `[${r.filename}](${r.url})`))
+      .join('\n') + '\n';
+
+    const latest = ta.value;
+    const newContent = latest.substring(0, insertPos) + snippet + latest.substring(insertPos);
+    onChange(newContent);
+    requestAnimationFrame(() => {
+      ta.focus();
+      ta.setSelectionRange(insertPos + snippet.length, insertPos + snippet.length);
+    });
+  }, [onFilesPaste, onChange]);
+
+  const handlePaste = (e: ClipboardEvent<HTMLTextAreaElement>) => {
+    if (!onFilesPaste) return;
+    const items = e.clipboardData?.items;
+    if (!items) return;
+    const files: File[] = [];
+    for (let i = 0; i < items.length; i++) {
+      const item = items[i];
+      if (item.kind === 'file') {
+        const f = item.getAsFile();
+        if (f) files.push(f);
+      }
+    }
+    if (files.length === 0) return;
+    e.preventDefault();
+    void insertFilesAtCursor(files);
+  };
+
+  const handleDrop = (e: DragEvent<HTMLTextAreaElement>) => {
+    if (!onFilesPaste) return;
+    const files = Array.from(e.dataTransfer?.files || []);
+    if (files.length === 0) return;
+    e.preventDefault();
+    void insertFilesAtCursor(files);
+  };
+
+  const handleDragOver = (e: DragEvent<HTMLTextAreaElement>) => {
+    if (!onFilesPaste) return;
+    if (e.dataTransfer?.types.includes('Files')) {
+      e.preventDefault();
+    }
+  };
+
   return (
     <div className="flex flex-col h-full">
       {/* Toolbar */}
@@ -132,6 +197,9 @@ export default function LiveEditor({ content, onChange, location, mood }: LiveEd
             value={content}
             onChange={handleChange}
             onKeyDown={handleKeyDown}
+            onPaste={handlePaste}
+            onDrop={handleDrop}
+            onDragOver={handleDragOver}
             placeholder="输入 Markdown..."
             autoFocus
             className="w-full h-full px-4 py-3 resize-none bg-transparent text-text-primary placeholder:text-text-secondary/50 focus:outline-none text-[15px] leading-relaxed font-mono"
@@ -161,9 +229,7 @@ export default function LiveEditor({ content, onChange, location, mood }: LiveEd
           {/* Content */}
           <div className="markdown-body text-[15px] flex-1">
             {content ? (
-              <ReactMarkdown remarkPlugins={[remarkGfm]}>
-                {content.replace(/(?:^|\n)#(?!#)\S+\s*/g, '\n').trim()}
-              </ReactMarkdown>
+              <ReactMarkdown remarkPlugins={[remarkGfm]}>{content}</ReactMarkdown>
             ) : (
               <p className="text-text-secondary/40 italic">预览区域</p>
             )}

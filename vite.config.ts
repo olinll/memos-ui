@@ -7,14 +7,15 @@ import { URL } from 'node:url'
 const BACKEND = 'http://10.0.0.11:5230'
 
 /**
- * Manual proxy middleware for /file/ paths.
+ * Manual proxy middleware for backend-served static paths.
  * Vite's built-in proxy doesn't catch short prefixes before SPA fallback,
  * so we pipe the request ourselves at the earliest middleware stage.
  */
+const BACKEND_STATIC_PREFIXES = ['/file/', '/logo.webp', '/full-logo.webp', '/logo.png']
 function backendProxy(): Connect.NextHandleFunction {
   return (req, res, next) => {
     const url = req.url || ''
-    if (!url.startsWith('/file/')) return next()
+    if (!BACKEND_STATIC_PREFIXES.some((p) => url === p || url.startsWith(p))) return next()
 
     const target = new URL(url, BACKEND)
     const proxyReq = request(
@@ -46,6 +47,7 @@ export default defineConfig({
   server: {
     proxy: {
       '/api': { target: BACKEND, changeOrigin: true },
+      '/memos.api.v1.': { target: BACKEND, changeOrigin: true },
     },
   },
 })

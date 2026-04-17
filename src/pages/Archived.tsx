@@ -1,4 +1,5 @@
 import { useState, useEffect } from 'react';
+import toast from 'react-hot-toast';
 import { Loader2, Archive, RotateCcw } from 'lucide-react';
 import MemoCard from '../components/MemoCard';
 import type { Memo } from '../types';
@@ -7,12 +8,13 @@ import { listMemos, updateMemo, deleteMemo } from '../api/memos';
 export default function Archived() {
   const [memos, setMemos] = useState<Memo[]>([]);
   const [loading, setLoading] = useState(true);
+  const [absoluteTime, setAbsoluteTime] = useState(false);
 
   useEffect(() => {
-    listMemos(100, undefined, 'state == "ARCHIVED"').then(res => {
-      setMemos(res.memos);
-      setLoading(false);
-    });
+    listMemos(100, undefined, undefined, 'ARCHIVED')
+      .then(res => setMemos(res.memos))
+      .catch((e) => toast.error(`加载归档失败：${e.message || e}`))
+      .finally(() => setLoading(false));
   }, []);
 
   const handleRestore = async (memo: Memo) => {
@@ -49,7 +51,12 @@ export default function Archived() {
         <div className="space-y-4">
           {memos.map(memo => (
             <div key={memo.name} className="relative">
-              <MemoCard memo={memo} onDelete={handleDelete} />
+              <MemoCard
+                memo={memo}
+                onDelete={handleDelete}
+                absoluteTime={absoluteTime}
+                onToggleTime={() => setAbsoluteTime(v => !v)}
+              />
               <button
                 onClick={() => handleRestore(memo)}
                 className="absolute top-4 right-12 flex items-center gap-1 px-2 py-1 rounded-lg text-xs text-primary bg-tag hover:bg-primary/10 transition"

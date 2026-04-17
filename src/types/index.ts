@@ -74,12 +74,14 @@ export interface AuthResponse {
 export interface CreateMemoRequest {
   content: string;
   visibility: 'PUBLIC' | 'PROTECTED' | 'PRIVATE';
+  attachments?: Array<{ name: string }>;
 }
 
 export interface UpdateMemoRequest {
   content?: string;
   visibility?: 'PUBLIC' | 'PROTECTED' | 'PRIVATE';
   pinned?: boolean;
+  attachments?: Array<{ name: string }>;
 }
 
 export interface UserStats {

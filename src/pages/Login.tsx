@@ -1,10 +1,12 @@
 import { useState, type FormEvent } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../contexts/AuthContext';
-import { BookOpen, Loader2 } from 'lucide-react';
+import { useWorkspace } from '../hooks/useWorkspace';
+import { Loader2 } from 'lucide-react';
 
 export default function Login() {
   const { signIn } = useAuth();
+  const { title, description, logoUrl } = useWorkspace();
   const navigate = useNavigate();
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
@@ -29,11 +31,13 @@ export default function Login() {
     <div className="min-h-screen flex items-center justify-center bg-surface-secondary px-4">
       <div className="w-full max-w-sm">
         <div className="text-center mb-8">
-          <div className="inline-flex items-center justify-center w-14 h-14 bg-primary rounded-2xl mb-4">
-            <BookOpen className="w-7 h-7 text-white" />
-          </div>
-          <h1 className="text-2xl font-bold text-text-primary">Memos</h1>
-          <p className="text-text-secondary mt-1">记录你的每一个想法</p>
+          <img
+            src={logoUrl || '/logo.webp'}
+            alt={title}
+            className="inline-block w-14 h-14 rounded-2xl object-cover mb-4"
+          />
+          <h1 className="text-2xl font-bold text-text-primary">{title}</h1>
+          <p className="text-text-secondary mt-1">{description || '记录你的每一个想法'}</p>
         </div>
 
         <form onSubmit={handleSubmit} className="bg-surface rounded-2xl shadow-sm border border-border p-6 space-y-4">

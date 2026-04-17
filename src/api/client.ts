@@ -17,9 +17,15 @@ client.interceptors.response.use(
   (response) => response,
   (error) => {
     if (error.response?.status === 401) {
-      localStorage.removeItem('access_token');
-      if (window.location.pathname !== '/login') {
-        window.location.href = '/login';
+      // Only bounce to /login when the request was actually authenticated —
+      // a 401 with no token means a public visitor hit something protected,
+      // which the page should handle locally (e.g. memo not public).
+      const hadToken = !!localStorage.getItem('access_token');
+      if (hadToken) {
+        localStorage.removeItem('access_token');
+        if (window.location.pathname !== '/login') {
+          window.location.href = '/login';
+        }
       }
     }
     return Promise.reject(error);

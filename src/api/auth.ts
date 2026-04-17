@@ -14,6 +14,11 @@ export async function signOut(): Promise<void> {
   } catch { /* ignore */ }
 }
 
+export async function getUser(name: string): Promise<User> {
+  const { data } = await client.get(`/${name}`);
+  return data;
+}
+
 export async function getCurrentUser(): Promise<User> {
   // Decode user ID from JWT token to get user profile
   const token = localStorage.getItem('access_token');
