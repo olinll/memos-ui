@@ -11,13 +11,13 @@ services:
     restart: unless-stopped
 
   memos-ui:
-    build:
-      context: .
-      args:
-        VITE_API_BASE: http://localhost:5230
+    image: memos-ui:latest
     container_name: memos-ui
     ports:
       - "8080:80"
+    environment:
+      - BACKEND_URL=http://memos:5230
+      - BACKEND_GRPC=grpc://memos:5230
     depends_on:
       - memos
     restart: unless-stopped

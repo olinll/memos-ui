@@ -8,17 +8,17 @@ RUN npm ci
 
 COPY . .
 
-ARG VITE_API_BASE
-ENV VITE_API_BASE=$VITE_API_BASE
-
 RUN npm run build
 
 FROM nginx:alpine
 
 COPY --from=builder /app/dist /usr/share/nginx/html
 
-COPY nginx.conf /etc/nginx/conf.d/default.conf
+COPY nginx.conf /etc/nginx/conf.d/default.conf.template
+
+COPY docker-entrypoint.sh /docker-entrypoint.sh
+RUN chmod +x /docker-entrypoint.sh
 
 EXPOSE 80
 
-CMD ["nginx", "-g", "daemon off;"]
+CMD ["/docker-entrypoint.sh"]
