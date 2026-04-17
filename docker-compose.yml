@@ -17,7 +17,6 @@ services:
       - "8080:80"
     environment:
       - BACKEND_URL=http://memos:5230
-      - BACKEND_GRPC=grpc://memos:5230
     depends_on:
       - memos
     restart: unless-stopped
