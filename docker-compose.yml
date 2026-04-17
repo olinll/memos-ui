@@ -1,0 +1,26 @@
+version: '3.8'
+
+services:
+  memos:
+    image: neosmemo/memos:latest
+    container_name: memos
+    ports:
+      - "5230:5230"
+    volumes:
+      - memos-data:/var/opt/memos
+    restart: unless-stopped
+
+  memos-ui:
+    build:
+      context: .
+      args:
+        VITE_API_BASE: http://localhost:5230
+    container_name: memos-ui
+    ports:
+      - "8080:80"
+    depends_on:
+      - memos
+    restart: unless-stopped
+
+volumes:
+  memos-data:
