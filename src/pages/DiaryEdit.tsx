@@ -6,7 +6,7 @@ import {
 } from 'lucide-react';
 import {
   loadDiary, saveEntry,
-  type DiaryItem, type DiaryState,
+  type DiaryState,
 } from '../api/diary';
 import { resolveImageUrl, isDiaryEnabled } from '../config/diary';
 
