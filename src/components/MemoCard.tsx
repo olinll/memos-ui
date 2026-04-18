@@ -1,4 +1,4 @@
-import { useState, useRef, useEffect } from 'react';
+import { useState, useRef, useEffect, useMemo } from 'react';
 import { Link } from 'react-router-dom';
 import toast from 'react-hot-toast';
 import ReactMarkdown from 'react-markdown';
@@ -11,6 +11,7 @@ import {
 } from 'lucide-react';
 import type { Memo } from '../types';
 import { getAttachmentUrl } from '../api/memos';
+import AuthedImage from './AuthedImage';
 import ImageLightbox from './ImageLightbox';
 
 const visIcons = {
@@ -98,34 +99,54 @@ export default function MemoCard({ memo, onEdit, onDelete, onArchive, onPin, onT
   const moodMatch = memo.content.match(/(?:💭|心情)\s*[:：]?\s*([^\n]*)/);
   const mood = moodMatch?.[1]?.trim();
 
-  // Remove only the location/mood meta line from display; keep #tags as plain text
-  const displayContent = memo.content
-    .replace(/(?:📍|位置)[^\n]*/g, '')
-    .trim();
+  // Memoize derived lists so ReactMarkdown's `components` prop stays
+  // referentially stable across unrelated re-renders (e.g. menu toggle).
+  // Otherwise the custom `img` renderer is a fresh function each render,
+  // which React treats as a new element type → unmount/remount of the
+  // entire <AuthedImage> subtree, which in turn refetches every image.
+  const { displayContent, standaloneAttachments, images, otherFiles, allImages, inlineImageCount } = useMemo(() => {
+    const displayContent = memo.content
+      .replace(/(?:📍|位置)[^\n]*/g, '')
+      .trim();
+    const isInlineReferenced = (att: typeof memo.attachments[number]) => {
+      const url = getAttachmentUrl(att.name, att.filename);
+      return memo.content.includes(url) || memo.content.includes(att.name);
+    };
+    const standaloneAttachments = memo.attachments.filter(a => !isInlineReferenced(a));
+    const images = standaloneAttachments.filter(a => a.type.startsWith('image/'));
+    const otherFiles = standaloneAttachments.filter(a => !a.type.startsWith('image/'));
+    const inlineImages = [...displayContent.matchAll(/!\[([^\]]*)\]\(([^)\s]+)[^)]*\)/g)]
+      .map(m => ({ src: m[2], alt: m[1] || '' }));
+    const standaloneImageSrcs = images.map(img => ({
+      src: getAttachmentUrl(img.name, img.filename),
+      alt: img.filename,
+    }));
+    const allImages = [...inlineImages, ...standaloneImageSrcs];
+    return { displayContent, standaloneAttachments, images, otherFiles, allImages, inlineImageCount: inlineImages.length };
+  }, [memo.content, memo.attachments]);
 
-
-  // Skip attachments that the author already referenced inline via markdown
-  // (![](url) / [](url)) — otherwise they'd render twice: once in the body
-  // and again in the dedicated attachment strip.
-  const isInlineReferenced = (att: typeof memo.attachments[number]) => {
-    const url = getAttachmentUrl(att.name, att.filename);
-    return memo.content.includes(url) || memo.content.includes(att.name);
-  };
-  const standaloneAttachments = memo.attachments.filter(a => !isInlineReferenced(a));
-  const images = standaloneAttachments.filter(a => a.type.startsWith('image/'));
-  const otherFiles = standaloneAttachments.filter(a => !a.type.startsWith('image/'));
-
-  // Parse inline markdown images so they can open the lightbox too.
-  const inlineImages = [...displayContent.matchAll(/!\[([^\]]*)\]\(([^)\s]+)[^)]*\)/g)]
-    .map(m => ({ src: m[2], alt: m[1] || '' }));
-  const standaloneImageSrcs = images.map(img => ({
-    src: getAttachmentUrl(img.name, img.filename),
-    alt: img.filename,
-  }));
-  const allImages = [...inlineImages, ...standaloneImageSrcs];
+  const markdownComponents = useMemo(() => ({
+    img: ({ src, alt }: { src?: string; alt?: string }) => {
+      const idx = allImages.findIndex(im => im.src === src);
+      return (
+        <button
+          type="button"
+          onClick={(e) => { e.stopPropagation(); if (idx >= 0) setLightboxIndex(idx); }}
+          className="inline-block overflow-hidden rounded-lg cursor-zoom-in max-w-full bg-surface-secondary align-middle"
+        >
+          <AuthedImage
+            src={src || ''}
+            alt={alt || ''}
+            className="block max-h-64 max-w-full w-auto h-auto"
+            loading="lazy"
+          />
+        </button>
+      );
+    },
+  }), [allImages]);
 
   return (
-    <div className={`relative bg-surface rounded-2xl border border-border shadow-sm hover:shadow-md p-4 group fade-in-up card-hover ${showMenu ? 'z-40' : ''}`}>
+    <div className={`relative isolate bg-surface rounded-2xl border border-border shadow-sm hover:shadow-md p-4 group fade-in-up card-hover ${showMenu ? 'z-40' : ''}`}>
       {/* Header */}
       <div className="flex items-center justify-between mb-2">
         <div className="flex items-center gap-2 text-sm text-text-secondary">
@@ -256,28 +277,7 @@ export default function MemoCard({ memo, onEdit, onDelete, onArchive, onPin, onT
 
       {/* Content */}
       <div className="markdown-body text-[15px]">
-        <ReactMarkdown
-          remarkPlugins={[remarkGfm]}
-          components={{
-            img: ({ src, alt }) => {
-              const idx = allImages.findIndex(im => im.src === src);
-              return (
-                <button
-                  type="button"
-                  onClick={(e) => { e.stopPropagation(); if (idx >= 0) setLightboxIndex(idx); }}
-                  className="inline-block overflow-hidden rounded-lg cursor-zoom-in max-w-full bg-surface-secondary align-middle"
-                >
-                  <img
-                    src={src}
-                    alt={alt || ''}
-                    className="block max-h-64 max-w-full w-auto h-auto"
-                    loading="lazy"
-                  />
-                </button>
-              );
-            },
-          }}
-        >
+        <ReactMarkdown remarkPlugins={[remarkGfm]} components={markdownComponents}>
           {displayContent}
         </ReactMarkdown>
       </div>
@@ -295,10 +295,10 @@ export default function MemoCard({ memo, onEdit, onDelete, onArchive, onPin, onT
               {images.map((img, i) => (
                 <button
                   key={img.name}
-                  onClick={() => setLightboxIndex(inlineImages.length + i)}
+                  onClick={() => setLightboxIndex(inlineImageCount + i)}
                   className="inline-block overflow-hidden rounded-lg cursor-zoom-in max-w-full bg-surface-secondary"
                 >
-                  <img
+                  <AuthedImage
                     src={getAttachmentUrl(img.name, img.filename)}
                     alt={img.filename}
                     className="block max-h-64 max-w-full w-auto h-auto"

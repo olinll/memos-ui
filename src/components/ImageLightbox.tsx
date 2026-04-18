@@ -1,6 +1,7 @@
 import { useEffect, useCallback } from 'react';
 import { createPortal } from 'react-dom';
 import { X, ChevronLeft, ChevronRight } from 'lucide-react';
+import AuthedImage from './AuthedImage';
 
 interface ImageLightboxProps {
   images: { src: string; alt: string }[];
@@ -59,7 +60,7 @@ export default function ImageLightbox({ images, currentIndex, onClose, onChangeI
       )}
 
       {/* Image */}
-      <img
+      <AuthedImage
         src={current.src}
         alt={current.alt}
         onClick={(e) => e.stopPropagation()}

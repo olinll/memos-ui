@@ -4,8 +4,9 @@ import toast from 'react-hot-toast';
 import { format, isToday, isYesterday } from 'date-fns';
 import { Loader2, FileIcon, Paperclip, Trash2, ExternalLink } from 'lucide-react';
 import type { Attachment } from '../types';
-import { listAttachments, deleteAttachment, getAttachment, getAttachmentUrl } from '../api/memos';
+import { listAttachments, deleteAttachment, getAttachmentUrl } from '../api/memos';
 import ImageLightbox from '../components/ImageLightbox';
+import AuthedImage from '../components/AuthedImage';
 
 function formatSize(bytes: number): string {
   if (bytes < 1024) return `${bytes} B`;
@@ -27,8 +28,6 @@ export default function Attachments() {
   const [items, setItems] = useState<Attachment[]>([]);
   const [loading, setLoading] = useState(true);
   const [lightbox, setLightbox] = useState<{ images: Array<{ src: string; alt: string }>; index: number } | null>(null);
-  // Orphan attachments (no linked memo) 401 via /file/*; fetch their content via API instead.
-  const [orphanSrc, setOrphanSrc] = useState<Record<string, string | 'loading' | 'failed'>>({});
 
   useEffect(() => {
     listAttachments()
@@ -36,24 +35,6 @@ export default function Attachments() {
       .catch((e) => toast.error(`加载失败：${e.message || e}`))
       .finally(() => setLoading(false));
   }, []);
-
-  useEffect(() => {
-    for (const att of items) {
-      if (att.memo) continue;
-      if (!att.type.startsWith('image/')) continue;
-      if (orphanSrc[att.name]) continue;
-      setOrphanSrc(prev => ({ ...prev, [att.name]: 'loading' }));
-      getAttachment(att.name)
-        .then(full => {
-          if (full.content) {
-            setOrphanSrc(prev => ({ ...prev, [att.name]: `data:${att.type};base64,${full.content}` }));
-          } else {
-            setOrphanSrc(prev => ({ ...prev, [att.name]: 'failed' }));
-          }
-        })
-        .catch(() => setOrphanSrc(prev => ({ ...prev, [att.name]: 'failed' })));
-    }
-  }, [items, orphanSrc]);
 
   const grouped = useMemo(() => {
     const map = new Map<string, { date: Date; items: Attachment[] }>();
@@ -79,23 +60,14 @@ export default function Attachments() {
     }
   };
 
-  const resolveSrc = (a: Attachment): string | null => {
-    if (!a.memo) {
-      const v = orphanSrc[a.name];
-      return typeof v === 'string' && v !== 'loading' && v !== 'failed' ? v : null;
-    }
-    return getAttachmentUrl(a.name, a.filename);
-  };
-
   const openLightbox = (dayItems: Attachment[], att: Attachment) => {
-    const withSrc = dayItems
+    const imgs = dayItems
       .filter(a => a.type.startsWith('image/'))
-      .map(a => ({ name: a.name, src: resolveSrc(a), alt: a.filename }))
-      .filter((x): x is { name: string; src: string; alt: string } => !!x.src);
-    if (withSrc.length === 0) return;
-    const index = Math.max(0, withSrc.findIndex(x => x.name === att.name));
+      .map(a => ({ name: a.name, src: getAttachmentUrl(a.name, a.filename), alt: a.filename }));
+    if (imgs.length === 0) return;
+    const index = Math.max(0, imgs.findIndex(x => x.name === att.name));
     setLightbox({
-      images: withSrc.map(({ src, alt }) => ({ src, alt })),
+      images: imgs.map(({ src, alt }) => ({ src, alt })),
       index,
     });
   };
@@ -141,8 +113,6 @@ export default function Attachments() {
                   {group.items.map(att => {
                     const isImage = att.type.startsWith('image/');
                     const isOrphan = !att.memo;
-                    const src = resolveSrc(att);
-                    const orphanState = isOrphan ? orphanSrc[att.name] : undefined;
                     return (
                       <div
                         key={att.name}
@@ -151,34 +121,22 @@ export default function Attachments() {
                         }`}
                       >
                         {isImage ? (
-                          src ? (
-                            <button
-                              onClick={() => openLightbox(group.items, att)}
-                              className="block w-full h-32 bg-surface-secondary cursor-zoom-in"
-                            >
-                              <img
-                                src={src}
-                                alt={att.filename}
-                                className="w-full h-full object-cover"
-                                loading="lazy"
-                              />
-                            </button>
-                          ) : orphanState === 'loading' ? (
-                            <div className="flex items-center justify-center w-full h-32 bg-amber-50 text-amber-600 text-xs">
-                              <Loader2 className="w-5 h-5 animate-spin" />
-                            </div>
-                          ) : (
-                            <div className="flex flex-col items-center justify-center w-full h-32 bg-amber-50 text-amber-600 text-xs">
-                              <FileIcon className="w-8 h-8 mb-1 opacity-60" />
-                              <span>加载失败</span>
-                            </div>
-                          )
+                          <button
+                            onClick={() => openLightbox(group.items, att)}
+                            className="block w-full h-32 bg-surface-secondary cursor-zoom-in"
+                          >
+                            <AuthedImage
+                              src={getAttachmentUrl(att.name, att.filename)}
+                              alt={att.filename}
+                              className="w-full h-full object-cover"
+                              loading="lazy"
+                            />
+                          </button>
                         ) : (
                           <a
-                            href={isOrphan ? '#' : getAttachmentUrl(att.name, att.filename)}
-                            target={isOrphan ? undefined : '_blank'}
+                            href={getAttachmentUrl(att.name, att.filename)}
+                            target="_blank"
                             rel="noopener noreferrer"
-                            onClick={e => { if (isOrphan) e.preventDefault(); }}
                             className="flex items-center justify-center w-full h-32 bg-surface-secondary"
                           >
                             <FileIcon className="w-10 h-10 text-text-secondary" />

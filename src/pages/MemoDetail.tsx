@@ -13,6 +13,7 @@ import type { Memo, User } from '../types';
 import {
   getMemo, getAttachmentUrl, listMemoComments, createMemoComment,
 } from '../api/memos';
+import AuthedImage from '../components/AuthedImage';
 import { getUser } from '../api/auth';
 import { useAuth } from '../contexts/AuthContext';
 import ImageLightbox from '../components/ImageLightbox';
@@ -221,8 +222,8 @@ export default function MemoDetail() {
                     onClick={(e) => { e.stopPropagation(); if (idx >= 0) setLightboxIndex(idx); }}
                     className="inline-block overflow-hidden rounded-lg cursor-zoom-in max-w-full align-middle"
                   >
-                    <img
-                      src={src}
+                    <AuthedImage
+                      src={src || ''}
                       alt={alt || ''}
                       className="block max-h-[60vh] max-w-full w-auto h-auto"
                       loading="lazy"
@@ -248,7 +249,7 @@ export default function MemoDetail() {
                 onClick={() => setLightboxIndex(inlineImages.length + i)}
                 className="block overflow-hidden rounded-lg cursor-zoom-in"
               >
-                <img
+                <AuthedImage
                   src={getAttachmentUrl(img.name, img.filename)}
                   alt={img.filename}
                   className="w-full max-h-[60vh] object-contain rounded-lg"

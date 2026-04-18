@@ -12,6 +12,7 @@ import {
   getAttachmentUrl,
 } from '../api/memos';
 import type { Attachment } from '../types';
+import AuthedImage from '../components/AuthedImage';
 
 const DRAFT_KEY = 'memos-draft';
 
@@ -282,7 +283,7 @@ export default function Write() {
                 return (
                   <div key={att.name} className="relative group/att flex items-center gap-2 px-2 py-1 rounded-lg bg-surface border border-border text-xs text-text-secondary shadow-sm">
                     {isImage ? (
-                      <img
+                      <AuthedImage
                         src={att._blobUrl ?? getAttachmentUrl(att.name, att.filename)}
                         alt={att._origName ?? att.filename}
                         className="w-8 h-8 rounded object-cover"

@@ -2,13 +2,15 @@
 // Every mutation goes through a single atomic commit so data/diary.ts and
 // the image files land together.
 
-import { DIARY_CONFIG } from '../config/diary';
+import { DIARY_CONFIG, resolveImageUrl } from '../config/diary';
 import {
   parseDiary, serializeDiary, nextId,
   type DiaryFile, type DiaryItem,
 } from '../lib/diaryParser';
 import { convertToWebp, blobToBase64 } from '../lib/imageToWebp';
 import { commitFiles, getFileText, type CommitFile } from './github';
+import { createMemo, updateMemo, listMemos, uploadAttachment, deleteAttachment } from './memos';
+import type { Attachment, Memo } from '../types';
 
 export type { DiaryItem };
 
@@ -145,6 +147,148 @@ export async function deleteEntry(state: DiaryState, id: number): Promise<DiaryS
   setPinnedRef(result.sha);
   const file = parseDiary(nextSource);
   return { file, items: sortItems(file.items) };
+}
+
+// ---------- sync to memos ----------
+
+export interface SyncProgress {
+  done: number;
+  total: number;
+  currentDate?: string;
+}
+
+// First line of a synced memo is `#日记 id:<N>` — the `id:<N>` part is our
+// stable handle, used to find-or-create on subsequent syncs so the op is
+// idempotent.
+const DIARY_ID_MARKER = /^#日记\s+id:(\d+)/;
+
+function extractDiaryId(content: string): number | null {
+  const m = DIARY_ID_MARKER.exec(content);
+  return m ? Number(m[1]) : null;
+}
+
+async function listAllDiaryMemos(): Promise<Memo[]> {
+  const result: Memo[] = [];
+  let pageToken: string | undefined;
+  do {
+    const res = await listMemos(200, pageToken);
+    for (const m of res.memos ?? []) {
+      if (extractDiaryId(m.content) !== null) result.push(m);
+    }
+    pageToken = res.nextPageToken || undefined;
+  } while (pageToken);
+  return result;
+}
+
+// Build memo content per spec, separated by blank lines so markdown
+// renders each as its own paragraph:
+//   `#日记 id:<N>`  (stable marker for find-or-create)
+//   `位置：... 心情：... 标签：#a #b`  (omitted if all empty)
+//   original diary content
+function buildMemoContent(item: DiaryItem): string {
+  const meta: string[] = [];
+  if (item.location) meta.push(`位置：${item.location}`);
+  if (item.mood) meta.push(`心情：${item.mood}`);
+  if (item.tags?.length) meta.push(`标签：${item.tags.map(t => `#${t}`).join(' ')}`);
+
+  // Single `\n` in markdown collapses into a space, so promote each to a
+  // blank-line paragraph break.
+  const body = item.content.replace(/\n/g, '\n\n');
+
+  const parts = [`#日记 id:${item.id}`];
+  if (meta.length > 0) parts.push(meta.join('  '));
+  parts.push('---', body);
+  return parts.join('\n\n');
+}
+
+// Push every diary entry to the memos backend. Each memo's first line is
+// `#日记 id:<N>`, which lets us find-or-create on re-runs — re-syncing
+// updates the existing memos instead of duplicating. Images are
+// re-uploaded as attachments, deduped by filename against the memo's
+// existing attachments.
+export async function syncDiaryToMemos(
+  state: DiaryState,
+  opts: { onProgress?: (p: SyncProgress) => void } = {},
+): Promise<{ created: number; updated: number }> {
+  // Post earliest first so the memos timeline reads chronologically on a
+  // fresh sync.
+  const ordered = [...state.items].sort((a, b) => {
+    if (a.date === b.date) return a.id - b.id;
+    return a.date < b.date ? -1 : 1;
+  });
+
+  const existingMemos = await listAllDiaryMemos();
+  const byId = new Map<number, Memo>();
+  for (const m of existingMemos) {
+    const id = extractDiaryId(m.content);
+    if (id !== null) byId.set(id, m);
+  }
+
+  let created = 0;
+  let updated = 0;
+  let done = 0;
+  opts.onProgress?.({ done, total: ordered.length });
+
+  for (const item of ordered) {
+    opts.onProgress?.({ done, total: ordered.length, currentDate: item.date });
+    const content = buildMemoContent(item);
+    const existingMemo = byId.get(item.id);
+
+    // Reconcile attachments: reuse any with a matching filename; upload
+    // fresh ones for the rest.
+    const existingByFilename = new Map<string, Attachment>();
+    for (const a of existingMemo?.attachments ?? []) {
+      existingByFilename.set(a.filename, a);
+    }
+
+    const attachmentRefs: { name: string }[] = [];
+    for (const imgUrl of item.images ?? []) {
+      const filename = imgUrl.split('/').pop() || 'image.webp';
+      const reused = existingByFilename.get(filename);
+      if (reused) {
+        attachmentRefs.push({ name: reused.name });
+        continue;
+      }
+
+      const src = resolveImageUrl(imgUrl);
+      const res = await fetch(src);
+      if (!res.ok) throw new Error(`下载图片失败：${src} (${res.status})`);
+      const blob = await res.blob();
+      const file = new File([blob], filename, { type: blob.type || 'image/webp' });
+      // For new memos we have no memoName yet — upload as orphan and let
+      // the subsequent createMemo({attachments}) link them, same as
+      // Write.tsx's new-memo flow. For existing memos we pass memoName so
+      // the link happens at upload time.
+      const att = await uploadAttachment(file, existingMemo?.name);
+      attachmentRefs.push({ name: att.name });
+    }
+
+    // Trim attachments the user dropped from the diary entry.
+    const wantedNames = new Set(attachmentRefs.map(r => r.name));
+    for (const att of existingMemo?.attachments ?? []) {
+      if (!wantedNames.has(att.name)) {
+        await deleteAttachment(att.name).catch(() => {
+          /* ignore — memos will still show stale, but sync won't fail over it */
+        });
+      }
+    }
+
+    // Single create/update with content + attachments in one shot — this
+    // is what populates memo.attachments on the backend, which `/file/*`
+    // needs for auth to pass.
+    if (existingMemo) {
+      await updateMemo(existingMemo.name, { content, attachments: attachmentRefs });
+      updated++;
+    } else {
+      await createMemo({ content, visibility: 'PRIVATE', attachments: attachmentRefs });
+      created++;
+    }
+
+    done++;
+    opts.onProgress?.({ done, total: ordered.length, currentDate: item.date });
+  }
+
+  return { created, updated };
 }
 
 // ---------- helpers ----------

@@ -1,8 +1,8 @@
 import { useEffect, useState } from 'react';
 import { Link, useLocation, useNavigate } from 'react-router-dom';
 import toast from 'react-hot-toast';
-import { BookOpen, Loader2, Plus, Pencil, Trash2, ExternalLink, MapPin, Smile, Tag } from 'lucide-react';
-import { loadDiary, deleteEntry, type DiaryItem } from '../api/diary';
+import { BookOpen, Loader2, Plus, Pencil, Trash2, ExternalLink, MapPin, Smile, Tag, Upload } from 'lucide-react';
+import { loadDiary, deleteEntry, syncDiaryToMemos, type DiaryItem } from '../api/diary';
 import { DIARY_CONFIG, resolveImageUrl, isDiaryEnabled } from '../config/diary';
 import ImageLightbox from '../components/ImageLightbox';
 
@@ -25,6 +25,7 @@ export default function Diary() {
     ? { loading: false, error: null, items: fresh.items, raw: fresh }
     : { loading: true, error: null, items: [], raw: null });
   const [deletingId, setDeletingId] = useState<number | null>(null);
+  const [syncing, setSyncing] = useState(false);
   const [lightbox, setLightbox] = useState<{ images: { src: string; alt: string }[]; index: number } | null>(null);
 
   useEffect(() => {
@@ -66,6 +67,33 @@ export default function Diary() {
     }
   };
 
+  const handleSync = async () => {
+    if (!page.raw) return;
+    if (page.items.length === 0) { toast('没有可同步的日记'); return; }
+    if (!confirm(
+      `将 ${page.items.length} 条日记同步到 memos？\n`
+      + '每条 memo 开头会写入 #日记 id:<编号>，后续再同步会按 id 更新对应的 memo，不会重复创建。',
+    )) return;
+
+    setSyncing(true);
+    const toastId = toast.loading(`同步中 0/${page.items.length}...`);
+    try {
+      const result = await syncDiaryToMemos(page.raw, {
+        onProgress: ({ done, total, currentDate }) => {
+          toast.loading(
+            `同步中 ${done}/${total}${currentDate ? ` · ${currentDate}` : ''}`,
+            { id: toastId },
+          );
+        },
+      });
+      toast.success(`同步完成：新增 ${result.created}，更新 ${result.updated}`, { id: toastId });
+    } catch (e) {
+      toast.error(`同步失败：${(e as Error).message || e}`, { id: toastId, duration: 8000 });
+    } finally {
+      setSyncing(false);
+    }
+  };
+
   const openLightbox = (images: string[], startIdx: number) => {
     setLightbox({
       images: images.map(u => ({ src: resolveImageUrl(u), alt: '' })),
@@ -89,13 +117,24 @@ export default function Diary() {
             查看博客
           </a>
         </h2>
-        <button
-          onClick={() => navigate('/diary/new')}
-          className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-primary text-white text-sm font-medium hover:bg-primary-hover transition shadow-sm"
-        >
-          <Plus className="w-4 h-4" />
-          新日记
-        </button>
+        <div className="flex items-center gap-2">
+          <button
+            onClick={handleSync}
+            disabled={syncing || page.loading || page.items.length === 0}
+            className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-border text-text-secondary text-sm font-medium hover:text-primary hover:border-primary transition disabled:opacity-40 disabled:cursor-not-allowed"
+            title="把日记全部同步到 memos（会加 #日记 标签）"
+          >
+            {syncing ? <Loader2 className="w-4 h-4 animate-spin" /> : <Upload className="w-4 h-4" />}
+            同步到 memos
+          </button>
+          <button
+            onClick={() => navigate('/diary/new')}
+            className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-primary text-white text-sm font-medium hover:bg-primary-hover transition shadow-sm"
+          >
+            <Plus className="w-4 h-4" />
+            新日记
+          </button>
+        </div>
       </div>
 
       {page.loading ? (
