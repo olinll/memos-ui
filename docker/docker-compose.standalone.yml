@@ -1,0 +1,37 @@
+# 单独部署：只跑前端，通过 BACKEND_URL 连到外部已有的 memos 实例。
+#
+# 用法：
+#   cd docker
+#   BACKEND_URL=http://your-memos-host:5230 docker compose -f docker-compose.standalone.yml up -d
+#
+# 或者写进 .env：
+#   echo "BACKEND_URL=http://your-memos-host:5230" > .env
+#   docker compose -f docker-compose.standalone.yml up -d
+
+services:
+  memos-ui:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile
+      # VITE_* 是编译期变量，要进镜像必须在 build 时注入
+      args:
+        VITE_GITHUB_TOKEN: ${VITE_GITHUB_TOKEN:-}
+        VITE_DIARY_REPO: ${VITE_DIARY_REPO:-}
+        VITE_DIARY_BRANCH: ${VITE_DIARY_BRANCH:-}
+        VITE_DIARY_DATA_PATH: ${VITE_DIARY_DATA_PATH:-}
+        VITE_DIARY_IMAGE_DIR: ${VITE_DIARY_IMAGE_DIR:-}
+        VITE_DIARY_IMAGE_URL_PREFIX: ${VITE_DIARY_IMAGE_URL_PREFIX:-}
+        VITE_DIARY_BLOG_URL: ${VITE_DIARY_BLOG_URL:-}
+    image: memos-ui:latest
+    container_name: memos-ui
+    ports:
+      - "8080:80"
+    environment:
+      # 指向外部 memos 的 HTTP 地址。容器内要能访问到这个主机。
+      # 若后端跑在宿主机上，Linux 下可用 http://host.docker.internal:5230
+      # 并在下方启用 extra_hosts；Mac/Windows 默认解析。
+      - BACKEND_URL=${BACKEND_URL:-http://host.docker.internal:5230}
+    # Linux 宿主需要这一行才能解析 host.docker.internal
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    restart: unless-stopped

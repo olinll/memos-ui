@@ -1,4 +1,9 @@
-version: '3.8'
+# 开箱即用：直接拉镜像跑，不走本地构建。
+#
+#   docker compose up -d
+#
+# 前端镜像默认指向 ghcr 上的公开构建；要用自己的镜像把 MEMOS_UI_IMAGE 改掉即可。
+# 要对接已有的 memos 实例、不想跑内置 memos，见 docker/docker-compose.standalone.yml。
 
 services:
   memos:
@@ -11,7 +16,7 @@ services:
     restart: unless-stopped
 
   memos-ui:
-    image: memos-ui:latest
+    image: ${MEMOS_UI_IMAGE:-ghcr.io/olinll/memos-ui:latest}
     container_name: memos-ui
     ports:
       - "8080:80"

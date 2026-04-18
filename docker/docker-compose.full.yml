@@ -1,0 +1,43 @@
+# 集成部署：一次性起 memos 后端 + memos-ui 前端。
+# 前端通过容器网络内的 http://memos:5230 连后端，无需对外暴露后端端口。
+#
+# 用法：
+#   cd docker
+#   docker compose -f docker-compose.full.yml up -d
+
+services:
+  memos:
+    image: neosmemo/memos:latest
+    container_name: memos
+    # 若不需要外部直连后端可以去掉 ports，前端走内部网络即可
+    ports:
+      - "5230:5230"
+    volumes:
+      - memos-data:/var/opt/memos
+    restart: unless-stopped
+
+  memos-ui:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile
+      # VITE_* 是编译期变量，要进镜像必须在 build 时注入
+      args:
+        VITE_GITHUB_TOKEN: ${VITE_GITHUB_TOKEN:-}
+        VITE_DIARY_REPO: ${VITE_DIARY_REPO:-}
+        VITE_DIARY_BRANCH: ${VITE_DIARY_BRANCH:-}
+        VITE_DIARY_DATA_PATH: ${VITE_DIARY_DATA_PATH:-}
+        VITE_DIARY_IMAGE_DIR: ${VITE_DIARY_IMAGE_DIR:-}
+        VITE_DIARY_IMAGE_URL_PREFIX: ${VITE_DIARY_IMAGE_URL_PREFIX:-}
+        VITE_DIARY_BLOG_URL: ${VITE_DIARY_BLOG_URL:-}
+    image: memos-ui:latest
+    container_name: memos-ui
+    ports:
+      - "8080:80"
+    environment:
+      - BACKEND_URL=http://memos:5230
+    depends_on:
+      - memos
+    restart: unless-stopped
+
+volumes:
+  memos-data:

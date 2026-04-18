@@ -1,7 +1,8 @@
 import { Outlet, NavLink, useNavigate } from 'react-router-dom';
 import { useAuth } from '../contexts/AuthContext';
 import { useWorkspace } from '../hooks/useWorkspace';
-import { Home, Archive, LogOut, PenSquare, Paperclip } from 'lucide-react';
+import { Home, Archive, LogOut, PenSquare, Paperclip, BookOpen } from 'lucide-react';
+import { isDiaryEnabled } from '../config/diary';
 
 export default function Layout() {
   const { user, signOut } = useAuth();
@@ -15,6 +16,7 @@ export default function Layout() {
 
   const navItems = [
     { to: '/', icon: Home, label: '首页' },
+    ...(isDiaryEnabled() ? [{ to: '/diary', icon: BookOpen, label: '日记' }] : []),
     { to: '/attachments', icon: Paperclip, label: '附件' },
     { to: '/archived', icon: Archive, label: '归档' },
   ];

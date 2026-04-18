@@ -9,6 +9,9 @@ import Archived from './pages/Archived';
 import WritePage from './pages/Write';
 import MemoDetail from './pages/MemoDetail';
 import Attachments from './pages/Attachments';
+import Diary from './pages/Diary';
+import DiaryEdit from './pages/DiaryEdit';
+import { isDiaryEnabled } from './config/diary';
 import { Loader2 } from 'lucide-react';
 import type { ReactNode } from 'react';
 
@@ -60,6 +63,13 @@ function AppRoutes() {
         <Route path="/edit/*" element={<WritePage />} />
         <Route path="/archived" element={<Archived />} />
         <Route path="/attachments" element={<Attachments />} />
+        {isDiaryEnabled() && (
+          <>
+            <Route path="/diary" element={<Diary />} />
+            <Route path="/diary/new" element={<DiaryEdit />} />
+            <Route path="/diary/edit/:id" element={<DiaryEdit />} />
+          </>
+        )}
       </Route>
       <Route path="*" element={<Navigate to="/" replace />} />
     </Routes>
